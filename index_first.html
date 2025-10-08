@@ -1,0 +1,796 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Rhythmix - Music Player</title>
+  <link rel="shortcut icon" href="./logo.jpeg" type="image/x-icon">
+
+  <!-- Bootstrap & icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+
+  <style>
+    :root{
+      --bg:#0f0f10;
+      --panel:#18181a;
+      --muted:#9aa0a6;
+      --accent:#ff3b30;
+    }
+    html,body{height:100%}
+    body{
+      margin:0;
+      background:var(--bg);
+      color:#fff;
+      font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      overflow-y:auto;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+    }
+
+    /* blurred background */
+    .bg-blur{
+      position:fixed; inset:0; z-index:-2;
+      background-position:center; background-size:cover;
+      filter: blur(22px) saturate(120%);
+      transform: scale(1.07);
+      opacity:.22;
+      transition: background-image .45s ease, opacity .3s ease;
+    }
+    .bg-overlay{
+      position:fixed; inset:0; z-index:-1;
+      background: linear-gradient(180deg, rgba(0,0,0,0.6), rgba(0,0,0,0.95));
+    }
+
+    /* layout */
+    .app { min-height:100vh; display:flex; align-items:stretch; }
+    .sidebar { width:220px; background:transparent; border-right:1px solid rgba(255,255,255,0.04); padding:18px 14px; display:flex; flex-direction:column; }
+    .brand{ font-weight:700; display:flex; gap:10px; align-items:center; margin-bottom:12px; }
+    .nav-link{ color:#ddd; }
+    .nav-link.active{ color:var(--accent); font-weight:600; }
+
+    .sidebar nav { flex:1 1 auto; }
+    .sidebar .small { flex-shrink:0; margin-top:auto; margin-bottom:0; }
+
+    .content{ flex:1; padding:22px; padding-bottom:120px; }
+
+    .playlist .track{
+      background: rgba(255,255,255,0.02);
+      border-radius:8px;
+      padding:10px;
+      display:flex; gap:12px; align-items:center;
+      transition:background .12s, transform .08s, box-shadow .12s;
+    }
+    .playlist .track:hover{ background: rgba(255,255,255,0.035); transform: translateY(-3px); cursor:pointer; box-shadow: 0 6px 20px rgba(0,0,0,0.45); }
+    .track img{ width:56px; height:56px; object-fit:cover; border-radius:6px; flex-shrink:0; }
+
+    /* bottom player */
+    .player-bar{
+      position:fixed; left:0; right:0; bottom:0;
+      background: linear-gradient(180deg, rgba(24,24,26,0.96), rgba(12,12,13,0.99));
+      border-top: 1px solid rgba(255,255,255,0.05);
+      padding:10px 16px; display:flex; align-items:center; gap:14px; z-index:50;
+      box-shadow: 0 -6px 30px rgba(0,0,0,0.6);
+      transform: translateY(100%);
+      transition: transform 0.3s ease;
+    }
+    .player-bar.visible{
+      transform: translateY(0);
+    }
+    .player-left{ display:flex; gap:12px; align-items:center; min-width:260px; }
+    .player-cover{ width:64px; height:64px; border-radius:6px; object-fit:cover; transition: opacity .35s ease, transform .35s ease; }
+    .song-meta h6{ margin:0; font-size:15px; }
+    .song-meta p{ margin:0; font-size:12px; color:var(--muted); }
+
+    .player-middle{ flex:1; display:flex; flex-direction:column; gap:8px; align-items:center; }
+    .controls{ display:flex; gap:18px; align-items:center; }
+    .btn-control{
+      width:40px; height:40px; display:grid; place-items:center; border-radius:50%;
+      background:transparent; border:none; color:#fff; font-size:18px;
+    }
+    .btn-control.big{ width:56px; height:56px; font-size:20px; background: rgba(255,255,255,0.03); }
+    .btn-control.toggle.active{ color:var(--accent); }
+
+    .progress-wrap{ width:100%; display:flex; gap:12px; align-items:center; }
+    .time{ font-size:12px; color:var(--muted); min-width:46px; text-align:center; }
+
+    .progress{ background: rgba(255,255,255,0.06); height:8px; border-radius:8px; width:100%; position:relative; cursor:pointer; overflow:hidden; }
+    .progress > .bar{ height:100%; width:0%; border-radius:6px; background: linear-gradient(90deg, var(--accent), #ff7b72); transition: width .15s linear; }
+
+    .player-right{ min-width:220px; display:flex; align-items:center; gap:12px; justify-content:flex-end; }
+    .volume-slider{ width:120px; }
+
+    /* Tab content */
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+
+    /* offcanvas sidebar on mobile */
+    @media (max-width: 767px){
+      .sidebar { display:none; }
+      .mobile-topbar { display:flex; justify-content:space-between; align-items:center; padding:8px 16px; gap:10px; font-size:22px; background:transparent; color:#fff; }
+      .player-left{ min-width:150px }
+      .player-right{ display:none; }
+      .dropdown-toggle::after { display:none; }
+      .dropdown-menu { background-color:#18181a; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-blur" id="bgBlur"></div>
+  <div class="bg-overlay"></div>
+
+  <!-- Mobile top bar -->
+  <div class="d-md-none mobile-topbar">
+    <!-- Hamburger -->
+    <div data-bs-toggle="offcanvas" data-bs-target="#mobileSidebar" aria-controls="mobileSidebar" style="cursor:pointer;">
+      <i class="bi bi-list"></i>
+    </div>
+    <!-- User profile -->
+    <div class="dropdown">
+      <a href="#" class="d-flex align-items-center text-white text-decoration-none" id="mobileProfileDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+        <img src="https://via.placeholder.com/32" alt="User" width="32" height="32" class="rounded-circle">
+      </a>
+      <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark" aria-labelledby="mobileProfileDropdown">
+        <li><a class="dropdown-item" href="#">Profile</a></li>
+        <li><a class="dropdown-item" href="#">Settings</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item text-danger" href="#">Logout</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="app">
+    <!-- Sidebar for desktop -->
+    <aside class="sidebar d-none d-md-flex">
+      <div class="brand text-white">
+        <svg width="28" height="20" viewBox="0 0 24 24" fill="none" style="transform:translateY(1px)">
+          <path d="M3 10v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z" fill="currentColor"></path>
+        </svg>
+        <span style="font-size:15px">Rhythmix</span>
+      </div>
+
+      <nav class="nav flex-column">
+        <a class="nav-link active" href="#" data-tab="home"><i class="bi bi-house-door"></i> Home</a>
+        <a class="nav-link" href="#" data-tab="explore"><i class="bi bi-compass"></i> Explore</a>
+        <a class="nav-link" href="#" data-tab="library"><i class="bi bi-collection-music"></i> Library</a>
+      </nav>
+
+      <div class="small text-muted mt-auto mb-2">Made with Bootstrap • Demo</div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="content">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4 class="mb-0" id="pageTitle">Home</h4>
+        <!-- Desktop profile dropdown -->
+        <div class="dropdown d-none d-md-block">
+          <a href="#" class="d-flex align-items-center text-white text-decoration-none dropdown-toggle" id="profileDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+            <img src="https://via.placeholder.com/32" alt="User" width="32" height="32" class="rounded-circle me-2">
+            <span class="d-none d-sm-inline">John Doe</span>
+          </a>
+          <ul class="dropdown-menu dropdown-menu-end dropdown-menu-dark" aria-labelledby="profileDropdown">
+            <li><a class="dropdown-item" href="#">Profile</a></li>
+            <li><a class="dropdown-item" href="#">Settings</a></li>
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item text-danger" href="#">Logout</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Tab Content -->
+      <div id="home" class="tab-content active">
+        <div class="row g-3">
+          <div class="col-12">
+            <h5>Welcome to Rhythmix</h5>
+            <p class="text-muted">Your personal music streaming service. Start playing some music to see the player appear.</p>
+            
+            <div class="row mt-4">
+              <div class="col-md-6">
+                <div class="card bg-dark border-secondary mb-3">
+                  <div class="card-body">
+                    <h5 class="card-title">Recently Played</h5>
+                    <p class="card-text text-muted">Your recently played tracks will appear here.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="card bg-dark border-secondary mb-3">
+                  <div class="card-body">
+                    <h5 class="card-title">Recommended For You</h5>
+                    <p class="card-text text-muted">Personalized recommendations based on your listening habits.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="explore" class="tab-content">
+        <div class="row g-3">
+          <div class="col-12">
+            <h5>Explore Music</h5>
+            <p class="text-muted">Discover new music and artists from around the world.</p>
+            
+            <div class="row mt-4">
+              <div class="col-md-4 mb-3">
+                <div class="card bg-dark border-0">
+                  <img src="https://via.placeholder.com/300x200" class="card-img-top" alt="Top Charts">
+                  <div class="card-body">
+                    <h6 class="card-title">Top Charts</h6>
+                    <p class="card-text text-muted">See what's trending worldwide</p>
+                  </div>
+                </div>
+              </div>
+              <div class="col-md-4 mb-3">
+                <div class="card bg-dark border-0">
+                  <img src="https://via.placeholder.com/300x200" class="card-img-top" alt="New Releases">
+                  <div class="card-body">
+                    <h6 class="card-title">New Releases</h6>
+                    <p class="card-text text-muted">Fresh music just released</p>
+                  </div>
+                </div>
+              </div>
+              <div class="col-md-4 mb-3">
+                <div class="card bg-dark border-0">
+                  <img src="https://via.placeholder.com/300x200" class="card-img-top" alt="Genres">
+                  <div class="card-body">
+                    <h6 class="card-title">Genres & Moods</h6>
+                    <p class="card-text text-muted">Find music by genre or mood</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="library" class="tab-content">
+        <div class="row g-3 playlist" id="playlist"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Mobile offcanvas sidebar -->
+  <div class="offcanvas offcanvas-start text-bg-dark" tabindex="-1" id="mobileSidebar" aria-labelledby="mobileSidebarLabel">
+    <div class="offcanvas-header">
+      <h5 class="offcanvas-title" id="mobileSidebarLabel">Rhythmix</h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body d-flex flex-column">
+      <nav class="nav flex-column">
+        <a class="nav-link active" href="#" data-tab="home"><i class="bi bi-house-door"></i> Home</a>
+        <a class="nav-link" href="#" data-tab="explore"><i class="bi bi-compass"></i> Explore</a>
+        <a class="nav-link" href="#" data-tab="library"><i class="bi bi-collection-music"></i> Library</a>
+      </nav>
+      <div class="small text-muted mt-auto mb-2">Made with Bootstrap • Demo</div>
+    </div>
+  </div>
+
+  <!-- Bottom player (hidden by default) -->
+  <div class="player-bar" id="playerBar" role="region" aria-label="Music player">
+    <div class="player-left">
+      <img id="playerCover" class="player-cover" src="" alt="cover">
+      <div class="song-meta">
+        <h6 id="playerTitle">—</h6>
+        <p id="playerArtist">—</p>
+      </div>
+    </div>
+    <div class="player-middle">
+      <div class="controls" role="toolbar" aria-label="Playback controls">
+        <button id="shuffleBtn" class="btn-control toggle" title="Shuffle" aria-pressed="false"><i class="bi bi-shuffle"></i></button>
+        <button id="prevBtn" class="btn-control" title="Previous"><i class="bi bi-skip-start-fill"></i></button>
+        <button id="playBtn" class="btn-control big" title="Play/Pause" aria-pressed="false"><i class="bi bi-play-fill" id="playIcon"></i></button>
+        <button id="nextBtn" class="btn-control" title="Next"><i class="bi bi-skip-end-fill"></i></button>
+        <button id="repeatBtn" class="btn-control toggle" title="Repeat" aria-pressed="false"><i class="bi bi-arrow-repeat"></i></button>
+      </div>
+      <div class="progress-wrap mt-1">
+        <div class="time" id="currentTime">0:00</div>
+        <div class="progress" id="progressBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="bar" id="progressBarFill"></div>
+        </div>
+        <div class="time" id="durationTime">0:00</div>
+      </div>
+    </div>
+    <div class="player-right">
+      <i class="bi bi-list" data-bs-toggle="offcanvas" data-bs-target="#queueCanvas" aria-controls="queueCanvas" style="font-size:20px" title="Queue"></i>
+      <input type="range" id="volume" class="form-range volume-slider" min="0" max="1" step="0.01" value="0.9" title="Volume" aria-label="Volume">
+    </div>
+  </div>
+
+  <!-- Queue offcanvas -->
+  <div class="offcanvas offcanvas-end text-bg-dark" tabindex="-1" id="queueCanvas" aria-labelledby="queueLabel">
+    <div class="offcanvas-header">
+      <h5 class="offcanvas-title" id="queueLabel">Up Next</h5>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body" id="queueList">
+      <!-- queue items -->
+    </div>
+  </div>
+
+  <audio id="audio" preload="metadata" crossorigin="anonymous"></audio>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+  <script>
+    /* ========== TRACK LIST ==========
+
+    I included a few NCS tracks that are available via NCS pages / Archive.org copies.
+    If you host MP3s yourself (preferred) replace src with your own URL (and ensure CORS header).
+
+    Sources: NCS listings and Archive.org pages (see citations in assistant message).
+    */
+    const songs = [
+      {
+        id: 1,
+        title: "Ek Ladki Ko Dekha To",
+        artist: "SANAM",
+        src: "./songs/ek_ladki.mp3",
+        cover: "./covers/ek_ladki.jpg"
+      },
+      {
+        id: 2,
+        title: "Tum Hi Ho",
+        artist: "Arijit Singh",
+        src: "./songs/tum_hi_ho.mp3",
+        cover: "./covers/tum_hi_ho.jpg"
+      },
+    ];
+
+    /* ========== DOM ========= */
+    const playlistEl = document.getElementById('playlist');
+    const queueListEl = document.getElementById('queueList');
+    const audio = document.getElementById('audio');
+    const playerTitle = document.getElementById('playerTitle');
+    const playerArtist = document.getElementById('playerArtist');
+    const playerCover = document.getElementById('playerCover');
+    const bgBlur = document.getElementById('bgBlur');
+    const playerBar = document.getElementById('playerBar');
+    const pageTitle = document.getElementById('pageTitle');
+
+    const playBtn = document.getElementById('playBtn');
+    const playIcon = document.getElementById('playIcon');
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const shuffleBtn = document.getElementById('shuffleBtn');
+    const repeatBtn = document.getElementById('repeatBtn');
+
+    const progressBar = document.getElementById('progressBar');
+    const progressBarFill = document.getElementById('progressBarFill');
+    const currentTimeEl = document.getElementById('currentTime');
+    const durationTimeEl = document.getElementById('durationTime');
+    const volume = document.getElementById('volume');
+
+    /* ========== STATE ========= */
+    let currentIndex = 0;
+    let isPlaying = false;
+    let isShuffle = false;
+    // repeatMode: 0 = off, 1 = repeat-one, 2 = repeat-all
+    let repeatMode = 0;
+    let currentTab = 'home';
+
+    // Shuffle pool to avoid repetition
+    let shufflePool = [];
+
+    // persist keys
+    const KEY = 'ytstyle_player_v1';
+
+    /* ========== UTILITIES ========= */
+    function saveState(){
+      const s = {
+        currentIndex, isShuffle, repeatMode, volume: audio.volume, currentTime: audio.currentTime, currentTab
+      };
+      try { localStorage.setItem(KEY, JSON.stringify(s)); } catch(e){}
+    }
+    function loadState(){
+      try {
+        const raw = localStorage.getItem(KEY);
+        if(!raw) return;
+        const s = JSON.parse(raw);
+        if(typeof s.currentIndex === 'number') currentIndex = s.currentIndex;
+        if(typeof s.isShuffle === 'boolean') isShuffle = s.isShuffle;
+        if(typeof s.repeatMode === 'number') repeatMode = s.repeatMode;
+        if(typeof s.volume === 'number') audio.volume = s.volume;
+        if(typeof s.currentTime === 'number') queuedSeek = s.currentTime;
+        if(typeof s.currentTab === 'string') switchTab(s.currentTab);
+      } catch(e){}
+    }
+
+    /* ========== TAB SWITCHING ========= */
+    function switchTab(tabName) {
+      // Update nav links
+      document.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.remove('active');
+        if (link.getAttribute('data-tab') === tabName) {
+          link.classList.add('active');
+        }
+      });
+      
+      // Update tab content
+      document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+      });
+      document.getElementById(tabName).classList.add('active');
+      
+      // Update page title
+      const titles = {
+        'home': 'Home',
+        'explore': 'Explore',
+        'library': 'Your Library'
+      };
+      pageTitle.textContent = titles[tabName] || 'Rhythmix';
+      
+      currentTab = tabName;
+      saveState();
+    }
+
+    /* ========== RENDER ========= */
+    function renderPlaylist(){
+      playlistEl.innerHTML = '';
+      songs.forEach((s, i) => {
+        const col = document.createElement('div');
+        col.className = 'col-12 col-md-6 col-lg-4';
+        col.innerHTML = `
+          <div class="track" data-index="${i}" role="button" tabindex="0" aria-label="Play ${s.title}">
+            <img src="${s.cover}" alt="cover ${i+1}" loading="lazy">
+            <div class="flex-grow-1">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <div>
+                  <div style="font-weight:600">${s.title}</div>
+                  <div style="font-size:13px;color:var(--muted)">${s.artist}</div>
+                </div>
+                <div class="ms-2 text-muted" style="font-size:12px">Demo</div>
+              </div>
+            </div>
+          </div>
+        `;
+        playlistEl.appendChild(col);
+
+        const trackEl = col.querySelector('.track');
+
+        // click
+        trackEl.addEventListener('click', () => {
+          loadSong(+trackEl.dataset.index);
+          playSong();
+        });
+
+        // keyboard
+        trackEl.addEventListener('keydown', (e)=> {
+          if(e.key === 'Enter') { loadSong(+trackEl.dataset.index); playSong(); }
+        });
+      });
+    }
+
+    function renderQueue(){
+      queueListEl.innerHTML = '';
+      songs.forEach((s, i) => {
+        const item = document.createElement('div');
+        item.className = 'd-flex align-items-center gap-2 mb-2 queue-item';
+        if(i === currentIndex) item.classList.add('active');
+        item.innerHTML = `
+          <img src="${s.cover}" width="48" height="48" style="object-fit:cover;border-radius:6px">
+          <div class="flex-grow-1">
+            <div style="font-weight:600">${s.title}</div>
+            <div style="font-size:13px;color:var(--muted)">${s.artist}</div>
+          </div>
+          <div class="btn-group" role="group" aria-label="queue controls">
+            <button class="btn btn-sm btn-outline-light play-queue" data-index="${i}" title="Play"><i class="bi bi-play-fill"></i></button>
+            <button class="btn btn-sm btn-outline-light up-queue" data-index="${i}" title="Move up"><i class="bi bi-arrow-up"></i></button>
+            <button class="btn btn-sm btn-outline-light down-queue" data-index="${i}" title="Move down"><i class="bi bi-arrow-down"></i></button>
+            <button class="btn btn-sm btn-outline-danger remove-queue" data-index="${i}" title="Remove"><i class="bi bi-trash"></i></button>
+          </div>
+        `;
+        queueListEl.appendChild(item);
+
+        item.querySelector('.play-queue').addEventListener('click', (e)=>{
+          const idx = +e.currentTarget.dataset.index;
+          loadSong(idx); playSong();
+          const off = bootstrap.Offcanvas.getInstance(document.getElementById('queueCanvas'));
+          if(off) off.hide();
+        });
+
+        item.querySelector('.remove-queue').addEventListener('click', (e)=>{
+          const idx = +e.currentTarget.dataset.index;
+          songs.splice(idx, 1);
+          if(idx < currentIndex) currentIndex--;
+          if(idx === currentIndex) { // currently playing removed
+            loadSong(Math.max(0, currentIndex-1)); pauseSong();
+          }
+          renderPlaylist(); renderQueue(); saveState();
+        });
+
+        item.querySelector('.up-queue').addEventListener('click', (e)=>{
+          const idx = +e.currentTarget.dataset.index;
+          if(idx <= 0) return;
+          const [a] = songs.splice(idx,1);
+          songs.splice(idx-1,0,a);
+          if(idx === currentIndex) currentIndex = idx-1;
+          else if(idx-1 === currentIndex) currentIndex = idx;
+          renderPlaylist(); renderQueue(); saveState();
+        });
+
+        item.querySelector('.down-queue').addEventListener('click', (e)=>{
+          const idx = +e.currentTarget.dataset.index;
+          if(idx >= songs.length-1) return;
+          const [a] = songs.splice(idx,1);
+          songs.splice(idx+1,0,a);
+          if(idx === currentIndex) currentIndex = idx+1;
+          else if(idx+1 === currentIndex) currentIndex = idx;
+          renderPlaylist(); renderQueue(); saveState();
+        });
+      });
+    }
+
+    /* ========== LOAD / PLAYBACK ========== */
+    let queuedSeek = null;
+    function loadSong(index){
+      if(index < 0) index = 0;
+      if(index >= songs.length) index = 0;
+      currentIndex = index;
+      const s = songs[currentIndex];
+      audio.src = s.src;
+      audio.crossOrigin = "anonymous";
+      playerTitle.textContent = s.title;
+      playerArtist.textContent = s.artist;
+      playerCover.style.opacity = 0;
+      setTimeout(()=>{ playerCover.src = s.cover; }, 40);
+      // update blur
+      bgBlur.style.backgroundImage = `url('${s.cover}')`;
+      // highlight
+      document.querySelectorAll('.track').forEach(t => t.classList.remove('active'));
+      const active = document.querySelector(`.track[data-index="${index}"]`);
+      if(active) active.classList.add('active');
+      renderQueue();
+
+      progressBarFill.style.width = '0%';
+      currentTimeEl.textContent = '0:00';
+      durationTimeEl.textContent = '0:00';
+
+      // Show player bar when a song is loaded
+      playerBar.classList.add('visible');
+
+      // attempt to preserve last saved position if user reloaded
+      audio.load();
+      // apply queued seek after metadata
+      if(queuedSeek !== null){
+        audio.currentTime = queuedSeek;
+        queuedSeek = null;
+      }
+      saveState();
+    }
+
+    playerCover.addEventListener('load', ()=> {
+      playerCover.style.opacity = 1; playerCover.style.transform = 'scale(1)';
+    });
+
+    function playSong(){
+      audio.play().then(()=> {
+        isPlaying = true;
+        playIcon.className = 'bi bi-pause-fill';
+        playBtn.setAttribute('aria-pressed','true');
+      }).catch(err=>{
+        console.warn("Play failed:", err);
+      });
+      saveState();
+    }
+    function pauseSong(){
+      audio.pause();
+      isPlaying = false;
+      playIcon.className = 'bi bi-play-fill';
+      playBtn.setAttribute('aria-pressed','false');
+      saveState();
+    }
+
+    function prevSong(){
+      if(audio.currentTime > 3){
+        audio.currentTime = 0;
+      } else {
+        if(isShuffle) {
+          pickFromShufflePool();
+        } else {
+          currentIndex = (currentIndex - 1 + songs.length) % songs.length;
+        }
+        loadSong(currentIndex); playSong();
+      }
+    }
+
+    function nextSong(){
+      if(isShuffle){
+        pickFromShufflePool();
+      } else {
+        currentIndex = (currentIndex + 1) % songs.length;
+      }
+      loadSong(currentIndex);
+      // prefetch: set preload on next track (browser hint)
+      setTimeout(()=> prefetchNext(), 80);
+      playSong();
+    }
+
+    function pickFromShufflePool(){
+      if(shufflePool.length === 0){
+        // refill pool with indices except currentIndex
+        shufflePool = songs.map((_,i)=>i).filter(i => i !== currentIndex);
+        // Fisher-Yates shuffle
+        for(let i=shufflePool.length-1;i>0;i--){
+          const j = Math.floor(Math.random()*(i+1));
+          [shufflePool[i], shufflePool[j]] = [shufflePool[j], shufflePool[i]];
+        }
+      }
+      currentIndex = shufflePool.shift();
+    }
+
+    function prefetchNext(){
+      try {
+        const nextIndex = isShuffle ? (shufflePool.length ? shufflePool[0] : (currentIndex+1)%songs.length) : (currentIndex+1)%songs.length;
+        const url = songs[nextIndex]?.src;
+        if(!url) return;
+        const link = document.createElement('link');
+        link.rel = 'preload';
+        link.as = 'audio';
+        link.href = url;
+        document.head.appendChild(link);
+        // remove after a bit
+        setTimeout(()=> document.head.removeChild(link), 60_000);
+      } catch(e){}
+    }
+
+    /* ========== EVENTS ========= */
+    // Tab switching
+    document.querySelectorAll('[data-tab]').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const tabName = e.currentTarget.getAttribute('data-tab');
+        switchTab(tabName);
+        
+        // Close mobile sidebar if open
+        const mobileSidebar = bootstrap.Offcanvas.getInstance(document.getElementById('mobileSidebar'));
+        if (mobileSidebar) {
+          mobileSidebar.hide();
+        }
+      });
+    });
+
+    playBtn.addEventListener('click', ()=> isPlaying ? pauseSong() : playSong());
+    prevBtn.addEventListener('click', prevSong);
+    nextBtn.addEventListener('click', nextSong);
+
+    shuffleBtn.addEventListener('click', ()=> {
+      isShuffle = !isShuffle;
+      shufflePool = []; // reset pool
+      shuffleBtn.classList.toggle('active', isShuffle);
+      shuffleBtn.setAttribute('aria-pressed', String(isShuffle));
+      saveState();
+    });
+
+    repeatBtn.addEventListener('click', ()=> {
+      repeatMode = (repeatMode + 1) % 3;
+      repeatBtn.classList.toggle('active', repeatMode > 0);
+      repeatBtn.title = repeatMode === 0 ? 'Repeat: off' : repeatMode === 1 ? 'Repeat: one' : 'Repeat: all';
+      repeatBtn.setAttribute('aria-pressed', String(repeatMode > 0));
+      saveState();
+    });
+
+    audio.addEventListener('loadedmetadata', ()=>{
+      if(!isNaN(audio.duration)) {
+        durationTimeEl.textContent = formatTime(audio.duration);
+        // if saved time exists, apply
+        try {
+          const raw = localStorage.getItem(KEY);
+          if(raw){
+            const s = JSON.parse(raw);
+            if(s && typeof s.currentTime === 'number' && s.currentTime < audio.duration - 2){
+              audio.currentTime = s.currentTime;
+            }
+          }
+        } catch(e){}
+      }
+    });
+
+    audio.addEventListener('timeupdate', ()=>{
+      if(!isNaN(audio.duration) && audio.duration > 0){
+        const pct = (audio.currentTime / audio.duration) * 100;
+        progressBarFill.style.width = pct + '%';
+        currentTimeEl.textContent = formatTime(audio.currentTime);
+        progressBar.setAttribute('aria-valuenow', String(Math.round(pct)));
+        saveState();
+      }
+    });
+
+    audio.addEventListener('ended', ()=>{
+      if(repeatMode === 1){
+        audio.currentTime = 0; playSong();
+      } else if(repeatMode === 2){
+        nextSong();
+      } else {
+        // repeatMode 0
+        // auto-next if not last, else stop
+        if(currentIndex < songs.length - 1) nextSong();
+        else { pauseSong(); }
+      }
+    });
+
+    audio.addEventListener('error', (e)=>{
+      console.error('Audio error', e);
+      // skip to next if current failed
+      nextSong();
+    });
+
+    progressBar.addEventListener('click', (e)=>{
+      const rect = progressBar.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const pct = Math.max(0, Math.min(1, x / rect.width));
+      if(audio.duration) audio.currentTime = pct * audio.duration;
+    });
+
+    // drag for seek
+    let dragging = false;
+    progressBar.addEventListener('pointerdown', (e)=>{
+      dragging = true;
+      progressBar.setPointerCapture(e.pointerId);
+      seekFromEvent(e);
+    });
+    window.addEventListener('pointermove', (e)=>{ if(dragging) seekFromEvent(e); });
+    window.addEventListener('pointerup', (e)=>{ if(dragging){ dragging = false; try{ progressBar.releasePointerCapture(e.pointerId);}catch{} } });
+
+    function seekFromEvent(e){
+      const rect = progressBar.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const pct = Math.max(0, Math.min(1, x / rect.width));
+      if(audio.duration) audio.currentTime = pct * audio.duration;
+    }
+
+    volume.addEventListener('input', (e)=>{
+      audio.volume = parseFloat(e.target.value);
+      saveState();
+    });
+
+    // keyboard shortcuts
+    window.addEventListener('keydown', (e)=>{
+      if(e.code === 'Space' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA'){
+        e.preventDefault(); isPlaying ? pauseSong() : playSong();
+      } else if(e.code === 'ArrowRight'){ nextSong(); }
+      else if(e.code === 'ArrowLeft'){ prevSong(); }
+      else if(e.code === 'ArrowUp'){ audio.volume = Math.min(1, audio.volume + 0.05); volume.value = audio.volume; saveState(); }
+      else if(e.code === 'ArrowDown'){ audio.volume = Math.max(0, audio.volume - 0.05); volume.value = audio.volume; saveState(); }
+    });
+
+    function formatTime(seconds){
+      if(!seconds || isNaN(seconds)) return '0:00';
+      const m = Math.floor(seconds/60);
+      const s = Math.floor(seconds % 60);
+      return `${m}:${s < 10 ? '0' + s : s}`;
+    }
+
+    /* ========== INIT ========= */
+    loadState();
+    renderPlaylist();
+    renderQueue();
+    
+    // Only load song if we have a valid currentIndex
+    if (songs.length > 0 && currentIndex >= 0 && currentIndex < songs.length) {
+      loadSong(currentIndex);
+    }
+
+    // attempt to autoplay after first user gesture (some browsers block autoplay)
+    let firstUserGestureDone = false;
+    function onFirstGesture(){
+      if(!firstUserGestureDone){
+        firstUserGestureDone = true;
+        // do not force play — but if user pressed play earlier it will work.
+      }
+    }
+    window.addEventListener('click', onFirstGesture, { once:true });
+
+    // ensure volume UI matches audio
+    volume.value = audio.volume;
+
+    // periodically save state
+    setInterval(saveState, 3000);
+  </script>
+</body>
+</html>
